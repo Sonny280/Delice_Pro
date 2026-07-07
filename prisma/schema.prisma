@@ -1,0 +1,898 @@
+// ═══════════════════════════════════════════════════════════════
+// prisma/schema.prisma — DELICE PRO (version complète v3)
+// ═══════════════════════════════════════════════════════════════
+//
+// MODELES :
+//   Company, User, Categorie, Unite, Fournisseur
+//   MatierePremiere, MouvementStock
+//   Recette, RecetteIngredient
+//   Produit, LigneProduction
+//   Production, Paton
+//   Vente, LigneVente
+//   Perte
+//   Client, CommandeClient, LigneCommandeClient
+//   CommandeFournisseur, LigneCommandeFournisseur
+//   CloturJournee
+//
+// TERMINOLOGIE SAELIA :
+//   pateEffective  = ce qu'on a vraiment obtenu (anciennement pateReelle)
+//   difference     = pateTheorique - pateEffective
+//   pateRecuperee  = venant d'un pétrin précédent (anciennement pateAjoutee)
+//   pateGatee      = inutilisable, jetée (anciennement pateDetruite)
+//   pateRetournee  = remise dans le pétrin suivant
+//   pateGardee     = chambre froide → lendemain
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// COMPANY
+// ─────────────────────────────────────────────────────────────
+model Company {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  nom               String
+  type              String  @default("Pâtisserie")
+  adresse           String?
+  ville             String?
+  pays              String?
+  telephone         String?
+  email             String?
+  siteWeb           String?
+  logoUrl           String? @db.Text
+  devise            String  @default("F")
+  couleurPrincipale String  @default("#1a2744")
+
+  // Heure minimale à partir de laquelle la clôture est autorisée (HH:MM)
+  heureCloture String @default("17:00")
+
+  // Objectif de CA journalier (pour le Dashboard)
+  objectifCA Float @default(0)
+
+  // Seuil d'alerte pertes (montant au-delà duquel une alerte est affichée)
+  seuilPertes Float @default(0)
+
+  // Charges fixes mensuelles pour le calcul du résultat estimé dans Rapports
+  // Inclut : loyer, salaires, énergie, amortissements...
+  chargesFixesMensuelles Float @default(0)
+
+  // Relations
+  users                User[]
+  categories           Categorie[]
+  unites               Unite[]
+  fournisseurs         Fournisseur[]
+  matieresPremieres    MatierePremiere[]
+  recettes             Recette[]
+  produits             Produit[]
+  productions          Production[]
+  patons               Paton[]            // Stock intermédiaire viennoiserie
+  ventes               Vente[]
+  sessionsCaisse       SessionCaisse[]
+  pertes               Perte[]
+  clients              Client[]
+  commandesClient      CommandeClient[]
+  commandesFournisseur CommandeFournisseur[]
+  cloturesJournee      CloturJournee[]
+  lotsStock            LotStock[]
+  favorisProduits      FavorisProduit[]
+}
+
+// ─────────────────────────────────────────────────────────────
+// USER
+// ─────────────────────────────────────────────────────────────
+model User {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  prenom       String
+  nom          String
+  email        String
+  passwordHash String
+  role         Role    @default(CAISSIER)
+  actif        Boolean @default(true)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  productions     Production[]
+  ventes          Vente[]
+  sessionsCaisse  SessionCaisse[]
+  cloturesJournee CloturJournee[]
+
+  @@unique([email, companyId])
+}
+
+enum Role {
+  ADMIN
+  RESPONSABLE
+  CHEF_PATISSIER
+  GESTIONNAIRE
+  CAISSIER
+  COMPTABLE
+}
+
+// ─────────────────────────────────────────────────────────────
+// CATEGORIE
+// ─────────────────────────────────────────────────────────────
+model Categorie {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  nom      String
+  type     TypeCategorie
+  margeMin Float?
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  produits          Produit[]
+  matieresPremieres MatierePremiere[]
+}
+
+enum TypeCategorie {
+  PRODUIT
+  MATIERE_PREMIERE
+}
+
+// ─────────────────────────────────────────────────────────────
+// UNITE
+// ─────────────────────────────────────────────────────────────
+model Unite {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  nom         String
+  abreviation String
+  type        TypeUnite
+  uniteBase   String
+  coefficient Float
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  matieresPremieres  MatierePremiere[]   @relation("UniteStockage")
+  recetteIngredients RecetteIngredient[]
+}
+
+enum TypeUnite {
+  MASSE
+  VOLUME
+  COMPTAGE
+  CONDITIONNEMENT
+}
+
+// ─────────────────────────────────────────────────────────────
+// FOURNISSEUR
+// ─────────────────────────────────────────────────────────────
+model Fournisseur {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  nom                String
+  contact            String?
+  telephone          String?
+  email              String?
+  adresse            String?
+  delaiLivraison     String?
+  conditionsPaiement String?
+  actif              Boolean @default(true)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  matieresPremieres MatierePremiere[]
+  commandes         CommandeFournisseur[]
+}
+
+// ─────────────────────────────────────────────────────────────
+// MATIERE PREMIERE
+// ─────────────────────────────────────────────────────────────
+model MatierePremiere {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  nom         String
+  prixAchat   Float   @default(0)
+  stockActuel Float   @default(0)
+  seuilAlerte Float   @default(0)
+  actif       Boolean @default(true)
+
+  // false = eau, sel en vrac etc. — jamais déduit ni commandé
+  stockGere Boolean @default(true)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  categorieId String?
+  categorie   Categorie? @relation(fields: [categorieId], references: [id])
+
+  uniteId String?
+  unite   Unite?  @relation("UniteStockage", fields: [uniteId], references: [id])
+
+  fournisseurId String?
+  fournisseur   Fournisseur? @relation(fields: [fournisseurId], references: [id])
+
+  recetteIngredients RecetteIngredient[]
+  mouvementsStock    MouvementStock[]
+  lignesCommandeF    LigneCommandeFournisseur[]
+  pertes             Perte[]
+}
+
+// ─────────────────────────────────────────────────────────────
+// MOUVEMENT STOCK
+// ─────────────────────────────────────────────────────────────
+model MouvementStock {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  type     TypeMouvement
+  quantite Float
+  motif    String?
+
+  mpId String
+  mp   MatierePremiere @relation(fields: [mpId], references: [id], onDelete: Cascade)
+}
+
+enum TypeMouvement {
+  ENTREE_ACHAT
+  ENTREE_AJUSTEMENT
+  SORTIE_PRODUCTION
+  SORTIE_PERTE_MP
+  SORTIE_PERTE_PRODUIT
+  AJUSTEMENT
+}
+
+// ─────────────────────────────────────────────────────────────
+// RECETTE
+// ─────────────────────────────────────────────────────────────
+model Recette {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  nom         String
+  description String?
+
+  // Coefficient : quantité de pâte obtenue par unité de l'ingrédient de référence
+  // Ex: 1.82 → 50 kg farine = 91 kg de pâte théorique
+  ratioPate Float @default(1.0)
+
+  // Taux de perte à la cuisson (0-100%)
+  tauxPerte Float @default(0)
+
+  // Flag viennoiserie — plus fiable que la détection par nom
+  // Positionner à true pour toutes les recettes de viennoiserie (croissants, brioches...)
+  estViennoiserie Boolean @default(false)
+
+  // Ingrédient de référence : ce que représente la "quantité" saisie à la production
+  // FARINE    → quantité en kg  (boulangerie, viennoiserie)
+  // EAU       → quantité en L   (crème pâtissière, custard...)
+  // OEUFS     → quantité en unités (génoise, biscuit...)
+  // LAIT      → quantité en L
+  // CHOCOLAT  → quantité en kg  (ganache, mousse...)
+  // AUTRE     → unité libre définie dans ingredientReferenceUnite
+  ingredientReference      String @default("FARINE")
+  ingredientReferenceNom   String @default("Farine")   // Nom affiché ex: "Farine viennoise"
+  ingredientReferenceUnite String @default("kg")        // Unité ex: "kg", "L", "unités"
+
+  // Catégorie de recette : feuilletée, choux, levée, etc.
+  categorie String?
+  actif     Boolean @default(true)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  ingredients RecetteIngredient[]
+  produits    Produit[]
+  productions Production[]
+}
+
+// ─────────────────────────────────────────────────────────────
+// RECETTE INGREDIENT
+// ─────────────────────────────────────────────────────────────
+model RecetteIngredient {
+  id String @id @default(cuid())
+
+  // Quantité par kg de farine (dans l'unité de la MP)
+  quantite Float
+
+  recetteId String
+  recette   Recette @relation(fields: [recetteId], references: [id], onDelete: Cascade)
+
+  mpId String
+  mp   MatierePremiere @relation(fields: [mpId], references: [id])
+
+  uniteId String?
+  unite   Unite?  @relation(fields: [uniteId], references: [id])
+}
+
+// ─────────────────────────────────────────────────────────────
+// PRODUIT (produit fini)
+// ─────────────────────────────────────────────────────────────
+model Produit {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  nom         String
+  prixVente   Float
+  prixAchat   Float   @default(0)  // Pour produits revendus (Coca, bonbons...) — coût d'achat fournisseur
+  margeMin    Float   @default(25)
+
+  // Poids unitaire en grammes (ex: 320 pour une baguette de 320g)
+  // Utilisé pour calculer la pâte effective depuis les produits fabriqués
+  grammage    Float?
+
+  stockActuel Float   @default(0)
+  seuilAlerte Float   @default(10)
+  actif       Boolean @default(true)
+
+  // ─── Pâtisserie ────────────────────────────────────────────────────────────
+  // DLV = Date Limite de Vente en jours
+  // 0  = vente immédiate (pas de stock — ex: éclairs, choux à la crème)
+  // 1  = DLV 1 jour (pas de stock non plus selon le document SAELIA)
+  // >1 = entre en stock (ex: cakes, tartes qui se conservent)
+  dlvJours Int @default(1)
+
+  // Produit semi-fini : intermédiaire de production (génoise, crème au beurre...)
+  // Stocké séparément, utilisé comme ingrédient dans d'autres produits finis
+  estSemiFini Boolean @default(false)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  categorieId String?
+  categorie   Categorie? @relation(fields: [categorieId], references: [id])
+
+  recetteId String?
+  recette   Recette? @relation(fields: [recetteId], references: [id])
+
+  lignesVente      LigneVente[]
+  lignesCommande   LigneCommandeClient[]
+  pertes           Perte[]          @relation("PerteProduit")
+  patons           Paton[]          // Pâtons façonnés en ce produit (viennoiserie)
+  lignesProduction LigneProduction[] // Produits fabriqués lors des pétrins
+  lotsStock        LotStock[]         // Lots avec traçabilité DLV
+  favoris          FavorisProduit[]   // Favoris caisse rapide
+}
+
+// Favoris caisse — produits mis en avant dans la grille caisse
+model FavorisProduit {
+  id        String @id @default(cuid())
+  produitId String
+  produit   Produit @relation(fields: [produitId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  position  Int @default(0) // Ordre d'affichage (0 = premier)
+  @@unique([companyId, produitId])
+  @@index([companyId, position])
+}
+
+// ─────────────────────────────────────────────────────────────
+// LIGNE DE PRODUCTION
+// Chaque produit fabriqué lors d'un pétrin
+// La somme (quantite × poidsUnitaire / 1000) = pâte effective
+// ─────────────────────────────────────────────────────────────
+model LigneProduction {
+  id String @id @default(cuid())
+
+  // Produit fabriqué
+  produitId String
+  produit   Produit @relation(fields: [produitId], references: [id])
+
+  // Nombre de pièces fabriquées
+  quantite Int
+
+  // Poids unitaire au moment de la fabrication (en grammes)
+  // Copie du grammage du produit pour historique
+  poidsUnitaire Float
+
+  // Poids total en kg = quantite × poidsUnitaire / 1000
+  poidsTotal Float
+
+  productionId String
+  production   Production @relation(fields: [productionId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────
+// PRODUCTION
+// Cycle : EN_ATTENTE → EN_COURS → TERMINEE | ANNULEE
+// ─────────────────────────────────────────────────────────────
+model Production {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // ─── Identification du pétrin ───────────────────────────────
+  // Numéro du pétrin dans la journée (1er, 2ème, 3ème...)
+  numeroPetrin Int @default(1)
+
+  // Session : NUIT (pétrins 1-3, 22h-10h) ou JOUR (pétrins 4-5)
+  sessionProd String @default("NUIT")
+
+  // Pétrisseur (peut différer de l'utilisateur connecté)
+  nomPetrisseur String?
+
+  // Heures de début et fin pour le suivi opérationnel
+  heureDebut DateTime?
+  heureFin   DateTime?
+
+  // ─── Farine et pâte ─────────────────────────────────────────
+  // Quantité de farine utilisée comme base de calcul (kg)
+  quantiteFarine Float
+
+  // Pâte théorique = quantiteFarine × coefficientRecette + pateRecuperee
+  pateTheorique Float
+
+  // ─── Pâte effective (terme exact SAELIA) ────────────────────
+  // Ce qu'on a réellement obtenu du pétrin
+  // = somme(produits fabriqués × poids) + pateRetournee + pateGatee + pateGardee
+  pateEffective Float @default(0)
+
+  // Différence = pateTheorique - pateEffective (contrôle qualité)
+  difference Float @default(0)
+  ecartPct   Float @default(0)
+
+  // ─── Gestion de la pâte (nomenclature SAELIA exacte) ────────
+
+  // Pâte retournée : non enfournée, remise dans le pétrin suivant
+  pateRetournee Float @default(0)
+
+  // Pâte récupérée : venant d'un pétrin précédent (anciennement pateAjoutee)
+  pateRecuperee Float @default(0)
+
+  // Pâte gâtée : inutilisable, jetée (anciennement pateDetruite)
+  // → Pertes MP enregistrées proportionnellement
+  pateGatee  Float   @default(0)
+  causeGatee String? // "Trop fermentée" | "Tombée" | "Contaminée" | autre
+
+  // Pâte gardée : chambre froide → 1er pétrin du lendemain
+  pateGardee            Float   @default(0)
+  destinationPateGardee String? // "recuperee_demain" | "gatee"
+
+  // ─── Type et statut ─────────────────────────────────────────
+  categorieProd  CategorieProd    @default(BOULANGERIE)
+  statut         StatutProduction @default(EN_ATTENTE)
+  typeProduction TypeProduction   @default(VENTE)
+  nomClient      String?
+
+  date            DateTime  @default(now())
+  dateTerminaison DateTime?
+  notes           String?
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  recetteId String
+  recette   Recette @relation(fields: [recetteId], references: [id])
+
+  userId String
+  user   User @relation(fields: [userId], references: [id])
+
+  // Produits fabriqués lors de ce pétrin
+  lignesProduction LigneProduction[]
+
+  // Pâtons issus de ce pétrissage (viennoiserie uniquement)
+  patons    Paton[]
+  lotsStock LotStock[] // Lots créés lors de ce pétrin
+}
+
+// ─────────────────────────────────────────────────────────────
+// PATON (stock intermédiaire viennoiserie)
+// Un pâton = portion de pâte issue du pétrissage
+// Conservé en chambre froide et façonné le lendemain en pièces
+// ─────────────────────────────────────────────────────────────
+model Paton {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // Poids du pâton à la sortie du pétrin (ex: 4.5 kg)
+  poids Float
+
+  // Beurre incorporé lors du façonnage (ex: 1 kg — référence SAELIA)
+  poidsBeurre Float @default(0)
+
+  // Poids total après incorporation beurre (ex: 5.5 kg)
+  poidsTotal Float @default(0)
+
+  // Nombre de pièces obtenues après façonnage
+  nbPieces Int @default(0)
+
+  // Rendement réel = nbPieces / poidsTotal
+  rendement Float @default(0)
+
+  // Statut du pâton dans son cycle de vie
+  statutPaton StatutPaton @default(EN_CHAMBRE_FROIDE)
+
+  // Date de façonnage (le lendemain en général)
+  dateFaconnage DateTime?
+
+  // Appartenance
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Pétrin d'où vient ce pâton
+  productionId String
+  production   Production @relation(fields: [productionId], references: [id])
+
+  // Produit fabriqué avec ce pâton (défini au façonnage)
+  produitId String?
+  produit   Produit? @relation(fields: [produitId], references: [id])
+}
+
+enum StatutPaton {
+  EN_CHAMBRE_FROIDE // Conservé, pas encore façonné
+  FACONNE           // Transformé en pièces, stock mis à jour
+  PERDU             // Perte déclarée, pertes MP enregistrées
+}
+
+enum CategorieProd {
+  BOULANGERIE              // Pains ordinaires et spéciaux
+  VIENNOISERIE_PETRISSAGE  // Étape 1 : production des pâtons
+  VIENNOISERIE_FACONNAGE   // Étape 2 : transformation pâtons → pièces
+  PATISSERIE               // Pâtisserie : produits finis, semi-finis, DLV
+}
+
+enum StatutProduction {
+  EN_ATTENTE
+  EN_COURS
+  TERMINEE
+  ANNULEE
+}
+
+enum TypeProduction {
+  VENTE
+  COMMANDE
+}
+
+// ─────────────────────────────────────────────────────────────
+// VENTE
+// ─────────────────────────────────────────────────────────────
+// Session caisse — une par caissier par jour
+// Permet le rapport par caissier et la clôture individuelle
+model SessionCaisse {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  ouverteA      DateTime    @default(now())
+  fermeeA       DateTime?
+  fondInitial   Float       @default(0) // Montant du fond de caisse à l'ouverture
+  totalVentes   Float       @default(0) // CA total de la session
+  nbTransactions Int        @default(0)
+  statut        String      @default("OUVERTE") // OUVERTE | FERMEE
+
+  userId    String
+  user      User    @relation(fields: [userId], references: [id])
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, ouverteA])
+  @@index([userId])
+}
+
+model Vente {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  montantTotal  Float
+  montantBrut   Float  @default(0) // Avant remise
+  remiseMontant Float  @default(0) // Montant remisé
+  remisePct     Float  @default(0) // Pourcentage remise
+  modePaiement  ModePaiement @default(ESPECES)
+  date          DateTime     @default(now())
+  notes         String?
+  numero        Int?         // Numéro de ticket séquentiel du jour
+  statut        String       @default("VALIDEE") // VALIDEE | ANNULEE
+  motifAnnulation String?    // Raison de l'annulation
+
+  // Split paiement (2 modes sur 1 vente)
+  splitPaiement  Boolean @default(false)
+  split1Mode     String? // Mode du 1er paiement
+  split1Montant  Float?  // Montant du 1er paiement
+  split2Mode     String? // Mode du 2e paiement
+  split2Montant  Float?  // Montant du 2e paiement
+
+  // Client (optionnel — nom libre ou lié à un client enregistré)
+  nomClient String?
+  clientId  String?
+  client    Client? @relation(fields: [clientId], references: [id])
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  lignes LigneVente[]
+
+  @@index([companyId, date])
+  @@index([companyId, modePaiement])
+  @@index([clientId])
+}
+
+model LigneVente {
+  id String @id @default(cuid())
+
+  quantite     Int
+  prixUnitaire Float
+  sousTotal    Float
+
+  venteId String
+  vente   Vente  @relation(fields: [venteId], references: [id], onDelete: Cascade)
+
+  produitId String
+  produit   Produit @relation(fields: [produitId], references: [id])
+}
+
+enum ModePaiement {
+  ESPECES
+  MOBILE_MONEY
+  CARTE_BANCAIRE
+  VIREMENT
+  A_CREDIT
+  AUTRE
+}
+
+// ─────────────────────────────────────────────────────────────
+// PERTE
+// ─────────────────────────────────────────────────────────────
+model Perte {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  type     TypePerte
+  quantite Float
+  valeur   Float
+  cause    String
+  date     DateTime  @default(now())
+  notes    String?
+
+  // deductMP = false si les MP ont déjà été déduites (ex: pâte gâtée)
+  deductMP Boolean @default(true)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  produitId String?
+  produit   Produit? @relation("PerteProduit", fields: [produitId], references: [id])
+
+  mpId String?
+  mp   MatierePremiere? @relation(fields: [mpId], references: [id])
+
+  @@index([companyId, date])
+  @@index([companyId, type])
+}
+
+enum TypePerte {
+  PRODUIT_FINI
+  MATIERE_PREMIERE
+}
+
+// ─────────────────────────────────────────────────────────────
+// CLIENT
+// ─────────────────────────────────────────────────────────────
+model Client {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  nom        String
+  type       TypeClient @default(PARTICULIER)
+  telephone  String?
+  email      String?
+  adresse    String?
+  entreprise String?
+  notes      String?
+  actif      Boolean    @default(true)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  commandes CommandeClient[]
+  ventes    Vente[]
+}
+
+enum TypeClient {
+  PARTICULIER
+  PROFESSIONNEL
+}
+
+// ─────────────────────────────────────────────────────────────
+// COMMANDE CLIENT
+// Cycle : RECUE → EN_PRODUCTION → PRETE → LIVREE | ANNULEE
+// ─────────────────────────────────────────────────────────────
+model CommandeClient {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reference     String
+  statut        StatutCommandeClient @default(RECUE)
+  dateLivraison DateTime
+  montantTotal  Float                @default(0)
+  acompte       Float                @default(0)
+  notes         String?
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id])
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  lignes LigneCommandeClient[]
+
+  @@index([companyId, statut])
+  @@index([companyId, dateLivraison])
+  @@index([clientId])
+}
+
+model LigneCommandeClient {
+  id String @id @default(cuid())
+
+  quantite     Int
+  prixUnitaire Float
+  sousTotal    Float
+
+  commandeId String
+  commande   CommandeClient @relation(fields: [commandeId], references: [id], onDelete: Cascade)
+
+  produitId String
+  produit   Produit @relation(fields: [produitId], references: [id])
+}
+
+enum StatutCommandeClient {
+  RECUE
+  EN_PRODUCTION
+  PRETE
+  LIVREE
+  ANNULEE
+}
+
+// ─────────────────────────────────────────────────────────────
+// COMMANDE FOURNISSEUR
+// Cycle : BROUILLON → ENVOYEE → RECUE | ANNULEE
+// ─────────────────────────────────────────────────────────────
+model CommandeFournisseur {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reference           String
+  statut              StatutCommandeFournisseur @default(BROUILLON)
+  dateCommande        DateTime                  @default(now())
+  dateLivraisonPrevue DateTime?
+  dateLivraisonReelle DateTime?
+  montantTotal        Float                     @default(0)
+  notes               String?
+
+  fournisseurId String
+  fournisseur   Fournisseur @relation(fields: [fournisseurId], references: [id])
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  userId String?
+
+  lignes LigneCommandeFournisseur[]
+}
+
+model LigneCommandeFournisseur {
+  id String @id @default(cuid())
+
+  quantite      Float
+  prixUnitaire  Float
+  sousTotal     Float
+  quantiteRecue Float @default(0)
+
+  commandeId String
+  commande   CommandeFournisseur @relation(fields: [commandeId], references: [id], onDelete: Cascade)
+
+  mpId String
+  mp   MatierePremiere @relation(fields: [mpId], references: [id])
+}
+
+enum StatutCommandeFournisseur {
+  BROUILLON
+  ENVOYEE
+  RECUE_PARTIELLE
+  RECUE
+  ANNULEE
+}
+
+// ─────────────────────────────────────────────────────────────
+// LOTS DE STOCK — traçabilité DLV par production
+// ─────────────────────────────────────────────────────────────
+enum StatutLot {
+  ACTIF    // Stock disponible, DLV non dépassé
+  EPUISE   // Tout vendu avant expiration
+  EXPIRE   // DLV dépassé → passé en perte à la clôture
+  PERDU    // Déclaré perdu manuellement
+}
+
+model LotStock {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // Produit concerné
+  produitId String
+  produit   Produit @relation(fields: [produitId], references: [id])
+
+  // Production d'origine (optionnel — peut être une entrée manuelle)
+  productionId String?
+  production   Production? @relation(fields: [productionId], references: [id])
+
+  // Quantités
+  quantiteInitiale Int
+  quantiteRestante Int
+
+  // Dates
+  dateCreation    DateTime // Heure exacte de la production
+  dateExpiration  DateTime // dateCreation + dlvJours du produit (calculé à la création)
+  dlvJours        Int      // Copie du DLV au moment de la production
+
+  statut StatutLot @default(ACTIF)
+
+  // Traçabilité
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  notesExpiration String? // Raison si perte/perdu
+
+  @@index([companyId, statut])
+  @@index([companyId, dateExpiration])
+  @@index([produitId, statut])
+}
+
+// ─────────────────────────────────────────────────────────────
+// CLOTURE JOURNEE
+// ─────────────────────────────────────────────────────────────
+model CloturJournee {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  // Date de la journée clôturée (minuit)
+  date             DateTime
+
+  // Heure exacte de la clôture
+  heureRealisation DateTime
+
+  // Bilan ventes
+  caTotal        Float @default(0)
+  nbTransactions Int   @default(0)
+  totalEspeces   Float @default(0)
+  totalMobile    Float @default(0)
+  totalCarte     Float @default(0)
+  totalVirement  Float @default(0)
+  totalCredit    Float @default(0)
+
+  // Invendus
+  nbInvendus     Int   @default(0)
+  valeurInvendus Float @default(0)
+
+  // Pertes déclarées pendant la clôture
+  nbPertes     Int   @default(0)
+  valeurPertes Float @default(0)
+
+  // Fond de caisse
+  fondCaisse Float?
+  ecartFond  Float?
+
+  notes String?
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+}
+
