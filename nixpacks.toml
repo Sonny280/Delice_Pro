@@ -2,7 +2,7 @@
 cmds = ["npm ci --include=dev"]
 
 [phases.build]
-cmds = ["npm run build"]
+cmds = ["npx --yes prisma generate", "npx --yes tsc"]
 
 [start]
-cmd = "node_modules/.bin/prisma migrate deploy && node dist/server.js"
+cmd = "npx --yes prisma migrate deploy && node dist/server.js"
