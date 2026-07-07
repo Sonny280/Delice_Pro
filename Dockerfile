@@ -4,14 +4,15 @@ WORKDIR /app
 
 COPY package*.json ./
 
-RUN npm install && chmod -R +x node_modules/.bin/
+RUN npm install
 
 COPY . .
 
-RUN node_modules/.bin/prisma generate
+RUN node node_modules/prisma/build/index.js generate
 
-RUN node_modules/.bin/tsc
+RUN node node_modules/typescript/bin/tsc
 
 EXPOSE 5000
 
 CMD ["node", "dist/server.js"]
+
