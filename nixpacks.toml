@@ -1,8 +1,0 @@
-[phases.install]
-cmds = ["npm ci --include=dev"]
-
-[phases.build]
-cmds = ["npx --yes prisma generate", "npx --yes tsc"]
-
-[start]
-cmd = "npx --yes prisma migrate deploy && node dist/server.js"
