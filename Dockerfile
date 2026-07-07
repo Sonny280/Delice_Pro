@@ -2,23 +2,16 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copier package.json
 COPY package*.json ./
 
-# Installer TOUS les packages (dev inclus)
-RUN npm install
+RUN npm install && chmod -R +x node_modules/.bin/
 
-# Copier le code source
 COPY . .
 
-# Générer le client Prisma
-RUN ./node_modules/.bin/prisma generate
+RUN node_modules/.bin/prisma generate
 
-# Compiler TypeScript
-RUN ./node_modules/.bin/tsc
+RUN node_modules/.bin/tsc
 
-# Exposer le port
 EXPOSE 5000
 
-# Démarrer
 CMD ["node", "dist/server.js"]
